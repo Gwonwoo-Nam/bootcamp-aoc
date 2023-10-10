@@ -1,4 +1,4 @@
-(ns aoc2018_3 
+(ns aoc2018_3
   (:require [clojure.string :as str]
             [clojure.java.io :as io]))
 
@@ -8,7 +8,7 @@
    output: newline 문자 기준으로 split된 리스트"
   [filename]
   (let [input-file (io/resource filename)]
-    (map #(Integer/parseInt %) (str/split (slurp input-file) #"\n"))))
+    (map #(parse-long %) (str/split (slurp input-file) #"\n"))))
 ;; 파트 1
 ;; 다음과 같은 입력이 주어짐.
 
@@ -44,16 +44,14 @@
 (defn split-by-format [input]
   (->> input
        (map #(str/split % #"@|:| |#|,|x"))
-       (map (fn [l] (remove #(= % "") l))) 
+       (map (fn [l] (remove #(= % "") l)))
        (map (fn [l] (map #(Integer/parseInt %) l)))))
 
 
 (defn input-stream [input]
   (->> input
        (split-input-lines)
-       (split-by-format)
-   )
-  )
+       (split-by-format)))
 
 ;; 입력 테스트
 (comment
@@ -67,10 +65,8 @@
 
   (input-stream "#1 @ 1,3: 4x4
                  #2 @ 3,1: 4x4
-              #3 @ 5,5: 2x2")
-  
-  )
-  
+              #3 @ 5,5: 2x2"))
+
 ;; x,y 좌표의 범위를 생성한다.
 (defn cartesian-product [x-loc y-loc width height]
   (for [x (range x-loc (+ x-loc width)) y (range y-loc (+ y-loc height))]
@@ -78,52 +74,57 @@
 
 
 ;; map에 좌표 : ID로 값을 저장한다.
+;; 인자의 개수에 대해서.. 일반적으로 map으로 받아서 map으로 반환
+;; x-loc y-loc width height를 하나의 벡터로 묶기?
+;; 같은 위상끼리 구조화
+;; :id ~ :patch ~
+;; :id ~ :patch {:xloc , :yloc ~ }
+
 (defn mark-on-map [id x-loc y-loc width height]
   (->> (cartesian-product x-loc y-loc width height)
        (map (fn [[x y]] {:id id :coord [x y]}))))
 
 ;; 생성된 map을 합친다. 이 때 중복되는 값이 있으면 count한다.
 ;; 문제 참고해서 네이밍
-(defn merge-maps [parsed]
+(defn merge-patches [parsed]
   (->>
-   (map (fn [[id x-loc y-loc width height]] (mark-on-map id x-loc y-loc width height)) parsed)
-   (reduce #(concat %1 %2) {})))
+   (mapcat (fn [[id x-loc y-loc width height]] (mark-on-map id x-loc y-loc width height)) parsed)))
+;; apply concat
+;; => mapcat으로 한줄로 리팩토링 가능
+;; 가변 인자일 때 %1, %2 등은 생략 가능
 
 ;; map의 좌표만 가져와서 빈도 분석
 (defn analyze [data]
   (->> data
-       (map :coord) 
-       (frequencies)
-       (vals)
+       (map :coord)
+       frequencies
+       vals
        (filter #(> % 1))
-       (count)
-       ))
+       count))
 
 ;; 최종함수
 (defn output-stream [data]
   (->> data
-       (input-stream)
-       (merge-maps)
-       (analyze)
-       )
-  )
+       input-stream
+       merge-patches
+       analyze))
 
+;; 자료구조 map을 활용 input의 이름 붙이기
 (analyze [{:id 3, :coord [6 6]} {:id 3, :coord [6 6]}])
 (filter (complement number?) (vals {:id 3, :coord [6 6]}))
 (comment
-  
-  (cartesian-product 1 3 4 4) 
+
+  (cartesian-product 1 3 4 4)
 
   (mark-on-map 1 1 3 4 4)
 
   (first (mark-on-map 1 1 3 4 4))
 
-  (merge-maps parsed)
+  (merge-patches parsed)
 
-  (analyze (merge-maps parsed))
+  (analyze (merge-patches parsed))
 
-  (output-stream puzzle)
-)
+  (output-stream puzzle))
 
 
 ;; 파트 2
@@ -139,36 +140,46 @@
        (map :id)
        (set)))
 
+
+(defn navigate-element [elem]
+  (map :id elem))
+
+(navigate-element [{:id 3 :coord [4]}, {:id 4 :coord [4]}])
+
+;; flatten 대신 mapcat을 사용
+;; map 안에서 map을 호출하지 않도록 -> 개별 함수로
 (defn find-overlapped-id [data]
   (->> data
-       (group-by :coord) 
+       (group-by :coord)
        (vals)
        (filter #(> (count %) 1))
-       (map (fn [l] (map :id l)))
-       (flatten)
+       (mapcat #(navigate-element %)) 
        (distinct)
        (set)))
 
+
+;; set을 아래에서 하는 방법
+;; map -> patch
+;; 함수이름, 인터페이스로 동작을 추측할 수 있게
 (defn get-difference [data]
-  (first 
+  (first
    (clojure.set/difference
-    (find-all-id (merge-maps data))
-    (find-overlapped-id (merge-maps data)))))
-  
+    (find-all-id (merge-patches data))
+    (find-overlapped-id (merge-patches data)))))
+
 (defn find-unique-patch [input]
   (->> input
        (input-stream)
        (get-difference)))
-  
+
 (comment
   (def data (input-stream "#1 @ 1,3: 4x4
                    #2 @ 3,1: 4x4
                 #3 @ 5,5: 2x2"))
-  (merge-maps data)
-  (find-overlapped-id (merge-maps data))
-  (find-all-id (merge-maps data))
-  
+  (merge-patches data)
+  (find-overlapped-id (merge-patches data))
+  (find-all-id (merge-patches data))
+
   (find-unique-patch "#1 @ 1,3: 4x4
                                         #2 @ 3,1: 4x4
-                                     #3 @ 5,5: 2x2")
-  )
+                                     #3 @ 5,5: 2x2"))

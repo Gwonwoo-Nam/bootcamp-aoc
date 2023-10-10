@@ -46,9 +46,8 @@
 
 
 ;; 리팩터링
-
 ;; 누적합 lazy seq 생성
-(defn accumulate-sum [input]
+(defn applied-frequency [input]
   (reductions + (cycle input))
   )
 
@@ -62,13 +61,13 @@
           acc-sum-seq))
 
 (defn find-first-duplicate-sum [input]
-  (find-first-dup (accumulate-sum input)))
+  (find-first-dup (applied-frequency input)))
 
 
 (comment
   (def puzzle (get-input-puzzle "day1.txt")) 
   (sum-numbers puzzle)
   (find-first-duplicate puzzle)
-  (accumulate-sum [3 3 4 -2 -4])
+  (applied-frequency [3 3 4 -2 -4])
   (find-first-duplicate-sum [3 3 4 -2 -4])
   )

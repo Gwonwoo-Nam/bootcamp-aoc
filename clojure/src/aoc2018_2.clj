@@ -18,59 +18,53 @@
 (require '[clojure.string :as str])
 
 ;; 문자열 파싱
-;; (defn parse-string [input]
-;;   (let [input (str/replace input " " "")]
-;;     (for [row (str/split input #"\n")] row)))
-
-;; 문자열 파싱
 (defn parse-string [input]
-  (->> (str/split input #"\n") 
-       (map #(str/trim %))))
-
-(comment
-  (parse-string "abcdef
-                         bababc
-                         ababab"))
-
-
-;; count가 2인 글자를 set에 추가
+  (->> (str/split-lines input) 
+       (map str/trim)))
 
 ;; 한 줄의 문자열에 들어있는 글자의 count 수가 2 혹은 3인 문자들 반환
-(defn count-chars [row count]
-  (set (keys (filter #(= (val %) count) (frequencies row)))))
-
-
-;; 한줄 단위로 
+;; set은 중복제거 용도보다는 distinct를 대신 사용
+;; count 대신 다른 이름
+;; entry 
+;; keep으로 변경해보기
+(defn count-chars [row cnt]
+  (->> row
+       (frequencies) 
+       (filter #(= (val %) cnt)) 
+       (keys)))
 
 ;; 2 혹은 3개의 문자열들 저장하는 set
 ;; 함수의 단위를 작게 나누어서 리팩토링 해보기
 ;; pos, inc, seq, split-lines 등 core 함수
 ;; 쓰레딩 매크로
+
 (defn get-repeated-charset [input c]
   (->> input
-       (map #(count-chars % c))
-       (filter seq)
+       (keep #(count-chars % c)) 
        count))
 
+
+;; 2개의 문자열, 3개의 문자열의 개수를 곱하여 반환
 (defn count-repeated-chars [input]
   (* 
-   (count (get-repeated-charset input 2)) 
-   (count (get-repeated-charset input 3))))
-
+   (get-repeated-charset (parse-string input) 2)) 
+   (get-repeated-charset (parse-string input) 3))
 
 (comment
 
-  (get-repeated-charset ["aabbcc"
-                         "bbcadf"
-                         "cadght"] 2)
-  (count-repeated-chars (parse-string "abcdef
-                                                bababc
-                                                abbcde
-                         abcccd
-                         aabcdd
-                         abcdee
-                         ababab"))
-)
+  (def strex "abcdef
+                                                               bababc
+                                                               abbcde
+                                        abcccd
+                                        aabcdd
+                                        abcdee
+                                        ababab")
+  
+  (parse-string strex)
+  
+  (get-repeated-charset ["abcdef" "bababc" "abbcde"] 2)
+  (count-repeated-chars str)
+  )
 
 ;; 파트 2
 ;; 여러개의 문자열 중, 같은 위치에 정확히 하나의 문자가 다른 문자열 쌍에서 같은 부분만을 리턴하시오.
@@ -92,32 +86,44 @@
 ;; combination
 
 
+;; 두 문자열 간 글자수가 일치하지 않는 개수를 계산하는 함수
+(defn count-diff [str1 str2]
+  (->> 
+   (remove #(= % str1) str2)
+   (count)))
 
+;; remove로 변경안됨..
 (defn count-diff [str1 str2]
   (->>
-   (map #(= %1 %2) str1 str2)
-   (filter false?)
-   (count))
-)
+   (map #(= %1 %2) str1 str2) 
+   (remove true?)
+   (count)))
 
+(count-diff "abc" "aab")
+
+;; 일치하지 않는 개수가 1개인지 여부를 반환하는 함수
 (defn nearly-same? [[str1 str2]]
   (= (count-diff str1 str2) 1))
 
-(defn combinations [parsed-string]
+;; 문자열의 가능한 조합을 반환하는 함수
+(defn cartesian-product [parsed-string]
   (for [x parsed-string y parsed-string] [x y]))
 
+;; 모든 조합에서 nearly-same인 문자열을 찾는 함수
 (defn find-nearly-same [str] 
   (->>
-   (combinations (parse-string str))
+   (cartesian-product (parse-string str))
    (filter nearly-same?)
-   (first))
-)
+   (first)))
 
+;; nearly-same인 경우 일치하는 문자열만 filter하여 반환하는 함수
 (defn conj-same [[str1 str2]]
   (->>
    (map (fn [c1 c2] (when (= c1 c2) c1)) str1 str2)
-   (filter (complement nil?))
-   (reduce str "")))
+   (remove nil?)
+   (apply clojure.core/str)))
+
+(conj-same ["abc" "abb"])
 
 (defn answer [str] 
    (conj-same (find-nearly-same str)))
@@ -131,7 +137,7 @@
                                                 aabcdd
                                                 abcdee
                                                 ababab"))
-  (combinations parsed)
+  (cartesian-product parsed)
   (count-diff "abc" "bbc")
   (nearly-same? ["abc" "bbc"])
   (find-nearly-same "abcdef
