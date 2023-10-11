@@ -154,13 +154,13 @@
        (vals)
        (filter #(> (count %) 1))
        (mapcat #(navigate-element %)) 
-       (distinct)
-       (set)))
+       (into #{})))
 
 
 ;; set을 아래에서 하는 방법
 ;; map -> patch
 ;; 함수이름, 인터페이스로 동작을 추측할 수 있게
+;; let binding
 (defn get-difference [data]
   (first
    (clojure.set/difference

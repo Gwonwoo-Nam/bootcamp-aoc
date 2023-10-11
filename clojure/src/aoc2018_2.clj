@@ -38,7 +38,7 @@
 ;; pos, inc, seq, split-lines 등 core 함수
 ;; 쓰레딩 매크로
 
-(defn get-repeated-charset [input c]
+(defn count-repeated-charset [input c]
   (->> input
        (keep #(count-chars % c)) 
        count))
@@ -46,9 +46,10 @@
 
 ;; 2개의 문자열, 3개의 문자열의 개수를 곱하여 반환
 (defn count-repeated-chars [input]
-  (* 
-   (get-repeated-charset (parse-string input) 2)) 
-   (get-repeated-charset (parse-string input) 3))
+  (let [parsed-input (parse-string input)]
+    (*
+     (count-repeated-charset parsed-input 2)
+     (count-repeated-charset parsed-input 3))))
 
 (comment
 
@@ -110,6 +111,7 @@
   (for [x parsed-string y parsed-string] [x y]))
 
 ;; 모든 조합에서 nearly-same인 문자열을 찾는 함수
+;; [String] -> String
 (defn find-nearly-same [str] 
   (->>
    (cartesian-product (parse-string str))
@@ -117,6 +119,9 @@
    (first)))
 
 ;; nearly-same인 경우 일치하는 문자열만 filter하여 반환하는 함수
+;; str, count 등 네이밍에 사용하지 않기
+;; parsing 위치에 대해서 고민 -> 재사용성
+;; AoC 문제 참고 -> 도메인 용어 사용
 (defn conj-same [[str1 str2]]
   (->>
    (map (fn [c1 c2] (when (= c1 c2) c1)) str1 str2)

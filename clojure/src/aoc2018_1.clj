@@ -52,6 +52,8 @@
   )
 
 ;; 중복 발생하는 첫 값을 반환하는 함수
+;; f(x) = x
+;; ppap - parse / process aggregate / print
 (defn find-first-dup [acc-sum-seq] 
   (reduce (fn [acc-set val]
             (if (contains? acc-set val)
