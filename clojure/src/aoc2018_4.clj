@@ -1,7 +1,7 @@
 (ns aoc2018_4
   (:require [clojure.string :as str]
-            [clojure.java.io :as io]
-            [aoc2018_4_data/test :as test]))
+            [clojure.java.io :as io]))
+          
 ;; 파트 1
 ;; 입력:
 
@@ -53,76 +53,94 @@
 ;; 최장수면시간 : Guard id별로 수면 시간을 group-by한 후 count
 ;; 빈도 : Guard Id와 time-stamp별로 group-by한 후 max인 time-stamp를 찾는다.
 
+(re-matches #"\[.*\].*" "[1518-11-01 00:00] Guard #10 begins shift")
+(re-matches #"\[(.*)\] (.*)" "[1518-11-01 00:00] Guard #10 begins shift")
+(re-seq #"\[(.*)\]" "[1518-11-01 00:00] Guard #10 begins shift")
 
-(defn tokenize-single-work-data
-  "단일 근무 데이터를 읽어들여 토큰들로 분리하는 함수
-   input - single-data:str
-   output - data-tokens:(str)"
-  [single-data]
-  (-> single-data
-      (str/replace #"falls asleep" "sleep")
-      (str/replace #"wakes up" "awake")
-      (str/replace #"\[|\]|\#" "")
-      (str/split #" ")))
+(defn destructure-func [a b c & serial]
+  (println a b c serial))
+  
+(destructure-func "a" "b" "c" "d")
+(destructure-func "a" "b" "c")
+(destructure-func "a" "b")
+(destructure-func "a" "b" "c" "d" "e" "f")
 
-(defn parse-single-work-data
+  (def matcher (re-matcher #"\d" "[1518-11-01 00:00]")))
+(re-find matcher)
+
+;; 합치는게 낫다.
+;; time이 너무 많이쓰이고 elapsed 등으로 변경 권장!
+(defn parse-single-event-log
   "단일 근무 데이터를 파싱하는 함수
      input - single-data:str
      output - parsed-single-data:(map)
-     ex - {:date 1518-11-01, :time 00:00, :keyword " Guard ", :id 10}"
-  [single-data]
-  (let [single-data (tokenize-single-work-data single-data)
-        parsed-time (map parse-long
-                         (->
-                          (second single-data)
-                          (str/split #":")))]
-    {:date (first single-data)
-     :time (+ (* 60 (first parsed-time)) (last parsed-time))
-     :minute (last parsed-time)
-     :keyword (get single-data 2)
-     :id (->
-          (if (nil? (get single-data 3))
-            nil
-            (parse-long (get single-data 3))))}))
+     ex - {:date 1518-11-01, :time 00:00, :keyword  Guard , :id 10}"
+  [line]
+  (let [[date time action guard-id] (-> line
+                                        (str/replace #"falls asleep" "sleep")
+                                        (str/replace #"wakes up" "awake")
+                                        (str/replace #"\[|\]|\#" "")
+                                        (str/split #" "))
+        [hour minute] (map parse-long
+                           (str/split time #":"))
+        elapsed (+ (* 60 hour) minute)
+        guard-id (when guard-id
+                   (parse-long guard-id))]
+    {:date date
+     :elapsed elapsed
+     :minute minute
+     :action action
+     :guard-id guard-id}))
 
-(defn fill-guard-id-information
+;; iterate -> 하나의 상태를 누적해서 변경할 때 적합(reduce 대신 사용 가능)
+;; clojure style guide
+(defn supplement-guard-id-into-event-logs
   "sleep, wake-up keyword 데이터에서 생략된 guard id를 이전 데이터의 id로 채워서 반환하는 함수
    input - single-work-data:(map)
    output - single-work-data:(map)"
-  [work-data]
-  (reduce (fn [acc item]
-            (if (:id item)
-              (conj acc item)
-              (let [item' (assoc item :id (:id (last acc)))]
-                (conj acc item'))))
-          [] work-data))
+  [event-logs]
+  (reduce (fn [acc log]
+            (if (:guard-id log)
+              (conj acc log)
+              (let [log' (assoc log :guard-id (:guard-id (last acc)))]
+                (conj acc log'))))
+          []
+          event-logs))
 
-(defn parse-work-data
+;; event log 등으로 개명
+;; parse 단계에 해당
+(defn parse-event-logs
   "전체 근무 데이터를 읽어들여 id를 채우고 시간 순 정렬하여 반환하는 함수
        input - raw-work-data:str
        output - parsed-single-data:((map))
        ex - [{:date 1518-11-01, :time 00:00, :keyword Guard, :id 10}]"
-  [raw-work-data]
-  (->> raw-work-data
+  [raw-event-logs]
+  (->> raw-event-logs
        (str/split-lines)
        (map str/trim)
-       (map tokenize-work-data)
-       (sort-by (juxt :date :time))
-       (fill-guard-id-information)))
+       (map parse-single-event-log)))
 
-;; work-data -> asleep-guard-data
-(defn convert-to-asleep-guard-data
+;; prepare 단계에 해당
+(defn sort-and-supplement-id-into-event-logs
+  [event-logs]
+  (->> event-logs
+       (sort-by (juxt :date :elapsed))
+       (supplement-guard-id-into-event-logs)))
+       
+
+;; partition 2 등의 함수로 전처리에서 처리해줄수 있지 않을까?
+(defn event-logs->asleep-guard-data
   "파싱된 전체 근무 데이터를 가드의 수면시간 데이터로 변환하는 함수
          input - parsed-work-data:((map))
          output - asleep-guard-data:((map))
          ex - [{:date 1518-11-01, :time 00:00, :keyword Guard, :id 10}]"
-  [parsed-work-data]
-  (->> parsed-work-data
-       (remove #(= (:keyword %) "Guard"))
+  [event-logs]
+  (->> event-logs
+       (remove #(= (:action %) "Guard"))
        (reduce (fn [acc item]
-                 (if (= (:keyword item) "sleep")
+                 (if (= (:action item) "sleep")
                    (conj acc
-                         {:id (:id item) :sleep (:minute item)})
+                         {:guard-id (:guard-id item) :sleep (:minute item)})
                    (conj acc
                          (assoc (last acc) :awake (:minute item))))) [])
        (filter #(> (count %) 2))))
@@ -136,32 +154,33 @@
   (->> asleep-guard-data
        (mapcat (fn [single-asleep-data]
                  (for [asleep-at (range (:sleep single-asleep-data) (:awake single-asleep-data))]
-                   {:id (:id single-asleep-data) :asleep-at asleep-at})))))
+                   {:guard-id (:guard-id single-asleep-data) :asleep-at asleep-at})))))
 
 (defn analyze-guard-asleep-pattern
-  [raw-work-data]
+  [raw-event-logs]
   "전체 근무 데이터를 입력받아 분석된 수면 빈도 데이터를 반환하는 함수
              input - raw-work-data:str
              output - asleep-frequency-data:((map))
              ex - [{:id 2207, :asleep-at 35}]"
-  (->> raw-work-data
-       (parse-work-data)
-       (convert-to-asleep-guard-data)
+  (->> raw-event-logs
+       (parse-event-logs)
+       (sort-and-supplement-id-into-event-logs)
+       (event-logs->asleep-guard-data)
        (convert-to-guard-asleep-frequency)))
 
 (comment
-  (tokenize-single-work-data "[1518-11-01 00:00] Guard #10 begins shift")
-  (parse-single-work-data "[1518-11-01 00:00] Guard #10 begins shift")
+  (parse-single-event-log "[1518-11-01 00:00] Guard #10 begins shift")
+  
+  test
+  (parse-event-logs test)
+  (sort-and-supplement-id-into-event-logs (parse-event-logs test))
+  
+  (event-logs->asleep-guard-data (sort-and-supplement-id-into-event-logs (parse-event-logs test)))
 
-  (parse-work-data test)
-  (def test-parsed-data (parse-work-data test))
-  (convert-to-asleep-guard-data test-parsed-data)
-  (def test-guard-asleep-data (convert-to-asleep-guard-data test-parsed-data))
-  test-guard-asleep-data
-
-  (convert-to-guard-asleep-frequency test-guard-asleep-data)
-
-  (analyze-guard-asleep-pattern test))
+  (convert-to-guard-asleep-frequency (event-logs->asleep-guard-data (sort-and-supplement-id-into-event-logs (parse-event-logs test))))
+  
+  (analyze-guard-asleep-pattern test) 
+  )
 
 ;; iterate -> lazy-seq
 ;; re-seq, re-matches, re-find 차이
@@ -173,7 +192,7 @@
    ex - [{:id 2207, :asleep-at 35}]"
   [asleep-frequency-data]
   (->> asleep-frequency-data
-       (group-by :id)
+       (group-by :guard-id)
        (vals)
        (sort-by count)
        (last)))
@@ -186,7 +205,7 @@
   (->> asleep-frequency-data
        (find-most-frequently-asleep-guard-data)
        (first)
-       (:id)))
+       (:guard-id)))
 
 (defn find-most-frequently-asleep-at-by-most-asleep-guard
   "가장 많이 졸은 가드의 가장 자주 잠을 잔 시각을 반환하는 함수
@@ -213,6 +232,7 @@
         (find-most-frequently-asleep-at-by-most-asleep-guard analyzed-guard-asleep-pattern))))
 
 (comment
+  
   (find-most-frequently-asleep-guard-data (analyze-guard-asleep-pattern test))
   (find-most-frequently-asleep-guard-id (analyze-guard-asleep-pattern test))
   (find-most-frequently-asleep-at-by-most-asleep-guard (analyze-guard-asleep-pattern test))
@@ -240,7 +260,7 @@
                output - id and time:map"
   [analyzed-guard-asleep-pattern]
   (->> analyzed-guard-asleep-pattern
-               (group-by :id)
+               (group-by :guard-id)
                vals
                (map frequency-by-guard)
                (map last)
@@ -256,7 +276,7 @@
   (let [analyzed-guard-asleep-pattern (analyze-guard-asleep-pattern raw-input-data)]
     (let [result
           (find-most-frequently-asleep-at analyzed-guard-asleep-pattern)]
-      (* (:id result) (:asleep-at result)))))
+      (* (:guard-id result) (:asleep-at result)))))
 
 (comment
 

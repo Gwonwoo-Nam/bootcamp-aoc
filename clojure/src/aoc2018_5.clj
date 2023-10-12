@@ -22,30 +22,32 @@
   (let [input-file (io/resource filename)]
     (slurp input-file)))
 
-(defn reactable?
-  "두 폴리머를 비교해 반응 가능한지를 반환하는 함수
-     input: prev-polymer:char current-polymer:char
-     output: boolean"
-  [prev-polymer current-polymer]
+;; 
+(defn reactive-with?
+  "두 Unit를 비교해 반응 가능한지를 반환하는 함수"
+  [unit-a unit-b]
   (let [opposite-polarity 32]
-    (-> prev-polymer
-        (int)
-        (- (int current-polymer))
-        (abs)
+    (-> unit-a
+        int
+        (- (int unit-b))
+        abs
         (= opposite-polarity))))
 
-(reactable? \a \A)
+(reactive-with? \a \A)
 
-(defn react-two-elements
+;; polymer -> unit (element)
+(defn react-polymer-with-an-element
   "acc 시퀀스와 현재 unit을 받아 반응 가능하다면 마지막 요소를 제거하고 아니라면 현재 요소를 추가한 acc 시퀀스를 반환한다.
      input: current-polymer:char reactor:seq
      output: reactor:seq"
-  [reactor current-polymer]
-  (if (reactable?
-       (if (> (count reactor) 0) (first reactor) 0)
-       current-polymer)
-    (rest reactor)
-    (conj reactor current-polymer)))
+  [polymer unit]
+  (if (reactive-with?
+       (if (> (count polymer) 0) (first polymer) 0)
+       unit)
+    (rest polymer)
+    (conj polymer unit)))
+
+(react-polymer-with-an-element '(\a \b \c) \C)
 
 (defn chain-react
   "인풋 데이터 전체를 입력받아 반응을 일으키고 남은 unit들의 이름을 문자열로 반환
@@ -53,8 +55,8 @@
    output: residual-elements:string"
   [input]
   (->> input
-       (reduce #(react-two-elements %1 %2) '())
-       (reverse)
+       (reduce #(react-polymer-with-an-element %1 %2) '())
+       reverse
        (apply str)))
 
 (defn get-length-after-reaction
@@ -103,8 +105,8 @@ input-puzzle
        (remove
         (fn [element]
           (or
-           (reactable? element removal-element)
-           (reactable? element (convert-upper-opposite-type removal-element)))))))
+           (reactive-with? element removal-element)
+           (reactive-with? element (convert-upper-opposite-type removal-element)))))))
 
 (remove-specific-type "Aabc"  \a)
 
@@ -118,7 +120,7 @@ input-puzzle
      (map (fn [removal-element] (char removal-element)) elements-range)
      (map (fn [removal-element] (remove-specific-type input-elements removal-element)))
      (map get-length-after-reaction)
-     (sort)
-     (first))))
+     sort
+     first)))
 
 (react-with-remove-atoz input-puzzle)
