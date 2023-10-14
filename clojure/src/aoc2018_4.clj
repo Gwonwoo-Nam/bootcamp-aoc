@@ -1,7 +1,28 @@
 (ns aoc2018_4
   (:require [clojure.string :as str]
-            [clojure.java.io :as io]))
-          
+            [clojure.java.io :as io]
+            [java-time.api :as jt])
+  (:import [java.time LocalDateTime]
+           [java.time.format DateTimeFormatter]))
+
+ ;; LocalTime vs ZonedTime
+ ;; LocalTime -> 최대 24시간 오차
+ ;; ZonedTime : 시간대 정보 있음, 정확한 시간 특정 가능
+ ;; LocalTime - 내수용, 리소스 절약 측면에서는 좋을 수도...?
+ ;; mysql - timezone 정보가 없음
+ ;; graphQL - zonedTime (UTC) 2023-10-12T05:44:50Z ISO 8601
+ ;; DB - localTime 암묵적인 시간대 (UTC or 한국시간 / UTC로 통일해서 사용 중)
+ ;; Date - 한국 날짜 기준
+ ;; Date는 시간대 정보가 없어 변환이 필요
+ 
+
+(comment
+ (str (java.time.ZonedDateTime/now (java.time.ZoneId/of "KST"))) 
+  
+
+ ) 
+ 
+
 ;; 파트 1
 ;; 입력:
 
@@ -53,44 +74,34 @@
 ;; 최장수면시간 : Guard id별로 수면 시간을 group-by한 후 count
 ;; 빈도 : Guard Id와 time-stamp별로 group-by한 후 max인 time-stamp를 찾는다.
 
-(re-matches #"\[.*\].*" "[1518-11-01 00:00] Guard #10 begins shift")
-(re-matches #"\[(.*)\] (.*)" "[1518-11-01 00:00] Guard #10 begins shift")
-(re-seq #"\[(.*)\]" "[1518-11-01 00:00] Guard #10 begins shift")
+ (jt/as (jt/local-date "yyyy/MM/dd" "1995/07/18") :year)
 
-(defn destructure-func [a b c & serial]
-  (println a b c serial))
-  
-(destructure-func "a" "b" "c" "d")
-(destructure-func "a" "b" "c")
-(destructure-func "a" "b")
-(destructure-func "a" "b" "c" "d" "e" "f")
-
-  (def matcher (re-matcher #"\d" "[1518-11-01 00:00]")))
-(re-find matcher)
-
-;; 합치는게 낫다.
-;; time이 너무 많이쓰이고 elapsed 등으로 변경 권장!
 (defn parse-single-event-log
   "단일 근무 데이터를 파싱하는 함수
      input - single-data:str
      output - parsed-single-data:(map)
      ex - {:date 1518-11-01, :time 00:00, :keyword  Guard , :id 10}"
   [line]
-  (let [[date time action guard-id] (-> line
-                                        (str/replace #"falls asleep" "sleep")
-                                        (str/replace #"wakes up" "awake")
-                                        (str/replace #"\[|\]|\#" "")
-                                        (str/split #" "))
-        [hour minute] (map parse-long
-                           (str/split time #":"))
-        elapsed (+ (* 60 hour) minute)
+  (let [[date-time event] (rest (re-matches #"\[(.*)\] (.*)" line))
+        [action guard-id] (-> event
+                              (str/replace #"falls asleep" "sleep")
+                              (str/replace #"wakes up" "awake")
+                              (str/replace #"#" "")
+                              (str/split #" "))
+        date-time (LocalDateTime/parse
+                   date-time
+                   (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm"))
+        minute (.getMinute date-time)
+        elapsed (+ (* 60 (.getHour date-time)))
         guard-id (when guard-id
                    (parse-long guard-id))]
-    {:date date
+    {:date-time date-time
      :elapsed elapsed
      :minute minute
      :action action
      :guard-id guard-id}))
+
+(parse-single-event-log "[1518-11-05 00:03] Guard #99 begins shift")
 
 ;; iterate -> 하나의 상태를 누적해서 변경할 때 적합(reduce 대신 사용 가능)
 ;; clojure style guide
@@ -124,7 +135,7 @@
 (defn sort-and-supplement-id-into-event-logs
   [event-logs]
   (->> event-logs
-       (sort-by (juxt :date :elapsed))
+       (sort-by (juxt :date-time))
        (supplement-guard-id-into-event-logs)))
        
 
