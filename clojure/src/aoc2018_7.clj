@@ -1,120 +1,154 @@
 (ns aoc2018_7
   (:require [clojure.string :as str]))
 
-;; parse stage
-;; input을 requirement / step으로 나누어 저장
+;;input의 패턴 정의
+(def condition-pattern #"Step ([A-Z]) must be finished before step ([A-Z]) can begin.")
 
-(defn parse-instruction [line]
-  (let [trimmed-line (str/trim line)
-        pattern #"Step ([A-Z]) must be finished before step ([A-Z]) can begin."
-        [_match requirement step] (re-matches pattern trimmed-line)]
+(defn parse-condition
+  "하나의 조건문을 파싱한다.
+   ex)
+   Step A must be finished before step B can begin.
+   => {:requirement A :step B}"
+  [line]
+  (let [[_match requirement step] (re-matches condition-pattern line)]
     {:requirement requirement :step step}))
 
-(defn parse-instructions [raw-text]
+(defn parse-conditions [raw-text]
+  "여러 조건절이 담긴 puzzle 입력을 받아 조건의 모음으로 파싱한다.
+   ex)
+   Step A must be finished before step B can begin.
+   Step C must be finished before step D can begin.
+   => ({:requirement A :step B} {:requirement C :step D})"
   (->> (str/split-lines raw-text)
-       (map parse-instruction)))
+       (map str/trim)
+       (map parse-condition)))
 
-(comment
-  (parse-instruction " Step C must be finished before step A can begin.")
-
-  (def parsed-instructions (parse-instructions "Step C must be finished before step A can begin.
-Step C must be finished before step F can begin.
-Step A must be finished before step B can begin.
-Step A must be finished before step D can begin.
-Step B must be finished before step E can begin.
-Step D must be finished before step E can begin.
-Step F must be finished before step E can begin.")))
-
-;; process stage
-;; requirement가 충족된 것을 filter
-;; 충족된 것 중 오름차순 정렬해 하나를 실행
-;; 실행한 step의 목록을 저장
-;; 이때 같은 것은 list로 묶어준다.
-;; {:requirement ["C"] :step "A"}
-;; {:requirement ["C"] :step "F"}
-;; {:requirement ["A"] :step "B"}
-;; {:requirement ["A"] :step "D"}
-;; {:requirement ["B" "D" "F"] :step "E"}
-;; 오름차순 정렬 -> 같은 step의 requirement끼리 묶기
-
-;; 전체 그룹 찾기
-(defn get-possible-step-pool [instructions]
-  (->> instructions
+(defn get-possible-step-pool [conditions]
+  "condition절을 분석하여 모든 conditions를 포함하는 step의 시퀀스를 생성한다.
+   ex)
+   ({:requirement A :step B} {:requirement C :step D})
+   => (A B C D)"
+  (->> conditions
        (mapcat (fn [instruction] [(:requirement instruction) (:step instruction)]))
        distinct))
 
-;; 일치하는게 있는지 확인
 (defn in?
+  "element이 collection의 원소 중 일치하는게 있는지 여부를 반환한다.
+   ex)
+   (in? [1 2 3] 2) => true
+   (in? :key ({:key A} {:key B}) A) => true"
   ([coll elm]
    (in? identity coll elm))
   ([key-fn coll elm]
    (some #(= elm (key-fn %)) coll)))
 
-;; 명시되지 않은 스텝을 명시
-(defn find-steps-without-requirement [instructions]
-  (->> (get-possible-step-pool instructions)
-       (remove (fn [instruction] (in? instructions instruction)))
-       (map (fn [group] {:step group}))))
 
-(defn collect-step [instructions]
-  (:step (first instructions)))
+(defn find-steps-without-requirement [conditions]
+  "조건이 없어 생략된 step의 목록을 반환한다.
+   ex)
+   => ({:step B} {:step C})"
+  (->> (get-possible-step-pool conditions)
+       (remove (fn [condition] (in? :step conditions condition)))
+       (map (fn [step] {:step step}))))
 
-(defn collect-requirements [instructions]
-  (->> instructions
-       (map :requirement)))
 
-(defn initial-context [instructions]
-  (let [preprocessed-instructions
-        (->> instructions
-             (concat (find-steps-without-requirement instructions))
-             (group-by :step)
-             (vals)
-             (map (fn [grouped-instructions] {:requirement (collect-requirements grouped-instructions)
-                                              :step (collect-step grouped-instructions)}))
-             (sort-by :step))]
-  {:in-progress []
-   :done []
-   :current-time 0
-   :instructions preprocessed-instructions
-   :workers 5}))
+(defn conditions->work-instructions
+  "conditions를 분석해 작업 지침을 만든다.
+   작업 지침은 
+   1. Step(단계)의 순서대로 정렬된 규칙의 모음을 의미한다.
+   2. pre-requisites는 특정 step을 실행하기 위한 모든 steps의 모음읻자.
+   ex)
+   ({:requirement (C), :step A}
+   {:requirement (A), :step B}
+   {:requirement (), :step C}
+   {:requirement (A), :step D}
+   {:requirement (B D F), :step E}
+   {:requirement (C), :step F})"
+  [conditions]
+  (->> conditions
+       (concat (find-steps-without-requirement conditions))
+       (group-by :step)
+       (vals)
+       (map (fn [grouped-conditions] {:pre-requisites (->> grouped-conditions
+                                                           (map :requirement)
+                                                           (remove nil?))
+                                      :step (:step (first grouped-conditions))}))
+       (sort-by :step)))
 
-(comment 
+(defn setup-initial-work-status
+  "초기 work-status를 생성한다.
+   work-status는 work-instructions과 현재 작업에 대한 메타정보를 포함한다.
+   :current-time - 작업의 현재 진행 시각
+   :in-progress-jobs - 진행 중인 작업의 목록
+   :done - 완료 작업 목록
+   :work-instructions - 작업지침
+   :idle-workers - 유휴 작업 가능 인원 수
 
-  (in? :step parsed-instructions "C")
+   ex)
+   {:current-time 0,
+    :in-progress-jobs [],
+    :done [],
+    :work-instructions
+    ({:requirement (C), :step A}
+    {:requirement (A), :step B}
+    {:requirement (), :step C}
+    {:requirement (A), :step D}
+    {:requirement (B D F), :step E}
+    {:requirement (C), :step F}),
+    :idle-workers 2}" 
+  ([work-instructions]
+   (setup-initial-work-status work-instructions 5))
+  ([work-instructions number-of-workers]
+   {:current-time 0
+    :in-progress-jobs []
+    :done []
+    :work-instructions work-instructions
+    :idle-workers number-of-workers}))
 
-  (find-steps-without-requirement parsed-instructions)
+(defn subset?
+  "a가 b의 부분집합인지 아닌지를 판별한다.
+   ex)
+   (subset? #{1 2} #{1 2 3}) => true"
+  [a b]
+  (empty? (clojure.set/difference a b)))
 
-  (collect-step [{:requirement "B", :step "E"} {:requirement "D", :step "E"} {:requirement "F", :step "E"}])
+(defn find-available-steps
+  "work-status를 읽어들여 다음의 가능한 step 정보를 가져온다.
+   다음 규칙을 따른다.
+   1. requirement가 모두 done에 포함된 케이스만 포함한다.
+   2. 작업 완료된 step은 제외한다.
+   3. 작업 진행 중인 step도 제외된다.
+   ex)
+   ({:pre-requisites (), :step C})"
+  [work-status]
+  (->> (:work-instructions work-status) 
+       (filter (fn [instruction] (subset? (set (:pre-requisites instruction)) 
+                                          (set (:done work-status)))))
+       (remove (fn [instruction] (in? (:done work-status) (:step instruction))))
+       (remove (fn [instruction] (in? (map :step (:in-progress-jobs work-status))
+                                      (:step instruction))))))
 
-  (collect-requirements [{:requirement "B", :step "E"} {:requirement "D", :step "E"} {:requirement "F", :step "E"}])
-
-  parsed-instructions
-
-  (def context (initial-context parsed-instructions))
-
-  context
-  )
-
-;; aggregate stage
-;; 다음에 할 것 구하기
-;; remove : have-done에 포함되어있는 step 제외
-;; filter : requirement가 모두 have-done에 포함된 케이스만
-
-(defn find-available-steps [context]
-  (->> (:instructions context)
-       (filter (fn [instruction] (or (empty? (clojure.set/difference (set (:requirement instruction)) (set (:done context))))
-                                     (= #{nil} (clojure.set/difference (set (:requirement instruction)) (set (:done context)))))))
-       (remove (fn [instruction] (in? (:done context) (:step instruction))))
-       (remove (fn [instruction] (in? (remove nil? (map :step (:in-progress context))) (:step instruction))))))
-
-(defn process-an-instruction [context]
-  (let [next-step (:step (first (find-available-steps context)))]
+(defn complete-incoming-work
+  "work-status를 읽어들여 다음 작업을 실행 완료한다.
+   ex)
+   {:done [C A],
+    :work-instructions
+    .. 생략"
+  [work-status]
+  (let [next-step (-> work-status
+                      find-available-steps
+                      first
+                      :step)]
     (if (nil? next-step)
-      context
-      {:done (conj (:done context) next-step)
-       :instructions (:instructions context)})))
+      work-status
+      {:current-time (:current-time work-status)
+       :in-progress-jobs (:in-progress-jobs work-status)
+       :done (conj (:done work-status) next-step)
+       :work-instructions (:work-instructions work-status)
+       :idle-workers (:idle-workers work-status)})))
 
 (defn fixed-point
+  "고정점을 찾는 함수"
   ([f x]
    (fixed-point identity f x))
   ([key-fn f x]
@@ -124,79 +158,150 @@ Step F must be finished before step E can begin.")))
                x'))
            (iterate f x))))
 
-(comment
-
-  (find-available-steps context)
-
-  (process-an-instruction context)
-
-  (fixed-point :done process-an-instruction context))
+(defn solve-part1 [raw-text]
+  (let [initial-work-status (->> raw-text
+                                 parse-conditions
+                                 conditions->work-instructions
+                                 setup-initial-work-status)]
+    (fixed-point :done complete-incoming-work initial-work-status)))
 
 ;; part 2
-;; done, in-progress 두 단계로 저장
 
-(defn get-work-duration [step]
-  (let [step-list "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
-    (get
-     (->> step-list
-          (map-indexed vector)
-          (map (fn [[idx step]] {(str step) (+ 61 idx)}))
-          (into {})) step)))
+(def steps [:A :B :C :D :E :F :G :H :I :J
+            :K :L :M :N :O :P :Q :R :S :T 
+            :U :V :W :X :Y :Z])
 
-;; 가능 worker수 만큼 available steps에서 가져와 할당한다.
-(defn dispatch-work [context]
-  (let [idle-worker-count (- (:workers context) (count (:in-progress context)))]
-    (->> (find-available-steps context)
-         (take idle-worker-count)
-         (map (fn [work] {:step (:step work)
-                          :remaining-seconds (get-work-duration (:step work))})))))
+(def step->work-duration
+  "작업 이름과 작업 소요 시간(seconds)을 hash map에 저장
+   ex)
+   (step->work-duration :A) => 0"
+  (zipmap steps
+          (range 0 (count steps))))
 
-(defn update-completed-work [context]
-  (let [in-progress (:in-progress context)]
-    (->> in-progress
-         (map (fn [work] {:step (:step work)
-                          :remaining-seconds (dec (:remaining-seconds work))}))
-         (filter #(zero? (:remaining-seconds %)))
-         (map :step))))
+(defn get-work-duration
+  "작업 이름(keyword)과 기본 근무 시간(seconds)을 입력받아 작업 소요 시간(seconds)을 구하는 함수
+   ex)
+  (get-work-duration 1 :A) => 1"
+  ([step] (get-work-duration 61 step))
+  ([default-work-duration step]
+    (+ default-work-duration (step->work-duration step))))
 
-;; 일시작 -> in-progress
-;; in-progress의 사이즈가 worker 사이즈가 될 때까지
-;; in-progress [{step : "A", remaining-seconds : 3}]
-;; 1초 남았을 때 progress 시 in-progress -> done으로 이동 및 progress에서 삭제
-(defn progress-work [context]
-  (let [in-progress (->> (:in-progress context)
-                         (map (fn [work] {:step (:step work)
-                                          :remaining-seconds (dec (:remaining-seconds work))}))
-                         (remove #(zero? (:remaining-seconds %))))
-        context' {:in-progress in-progress
-                  :done (if (empty? (update-completed-work context))
-                          (:done context)
-                          (concat (:done context) (update-completed-work context)))
-                  :instructions (:instructions context)
-                  :current-time (:current-time context)
-                  :workers (:workers context)}]
-    (concat (dispatch-work context') in-progress)))
+;; 0. dispatch-works-to-idle-workers : 다음 작업을 할당하고, 유휴 worker의 수를 업데이트한다.
+;; 1. progress-works : 시간 1초 증가시키고, 진행한 작업의 잔여 시간을 1초씩 감소시킨다.
+;; 2. complete-works : 잔여 시간이 0초인 작업을 완료 처리한다. (마감처리)
 
-(defn process-an-instruction-by-time [context] 
-  {:in-progress (progress-work context)
-   :done (if (empty? (update-completed-work context))
-           (:done context)
-           (concat (:done context) (update-completed-work context)))
-   :instructions (:instructions context)
-   :current-time (inc (:current-time context))
-   :workers (:workers context)})
+(defn instruction->work
+  "작업 지침을 입력받아 작업 이름과 잔여 시간의 정보를 갖는 실행 중인 일로 변환한다.
+   ex)
+   {:pre-requisites (C), :step A} => {:step C, :remaining-seconds 63}"
+  [instruction]
+  {:step (:step instruction)
+   :remaining-seconds (get-work-duration (keyword (:step instruction)))})
+
+(defn dispatch-works-to-idle-workers
+  [work-status] 
+  "근무 상태를 입력받아 다음 작업을 할당하고, 유휴 worker의 수를 업데이트한 근무 상태를 반환한다.
+   ex)
+   input ->
+   {:in-progress (),
+    ...
+    :current-time 0,
+    :idle-workers 2}
+   output ->
+   {:in-progress-jobs ({:step C, :remaining-seconds 63}),
+    ...
+    :current-time 0,
+    :idle-workers 1}"
+  (let [{in-progress-jobs :in-progress-jobs 
+         idle-workers :idle-workers} work-status        
+        dispatched-works (->> (find-available-steps work-status)
+                              (take idle-workers)
+                              (map instruction->work))]
+    (-> work-status
+        (assoc :in-progress-jobs (concat in-progress-jobs dispatched-works))
+        (assoc :idle-workers (- idle-workers (count dispatched-works))))))
+
+(defn progress-a-work
+  "근무를 입력받아 잔여 시각을 1초 감소시켜 반환한다.
+   ex)
+   {:step C, :remaining-seconds 63} -> {:step C, :remaining-seconds 62}"
+  [work]
+  (let [progressed-time (dec (:remaining-seconds work))]
+    (assoc work :remaining-seconds progressed-time)))
+
+(defn progress-works
+  "근무 상태를 입력받아 현재 시각을 1초 증가시키고, 진행한 작업의 잔여 시간을 1초씩 감소시킨 근무 상태를 반환한다.
+   ex)
+   input ->
+   {:in-progress-jobs ({:step C, :remaining-seconds 63}),
+    ...
+    :current-time 0,
+    :idle-workers 1}
+   output ->
+   {:in-progress-jobs ({:step C, :remaining-seconds 62}),
+    ...
+    :current-time 1,
+    :idle-workers 1}"
+  [work-status]
+  (let [{in-progress-jobs :in-progress-jobs
+         current-time :current-time} work-status
+        progressed-jobs (map progress-a-work in-progress-jobs)]
+    (-> work-status
+        (assoc :in-progress-jobs progressed-jobs)
+        (assoc :current-time (inc current-time)))))
+
+(defn works->work-names
+  [works]
+  "일의 시퀀스를 입력받아 이름의 시퀀스로 반환한다.
+   ex) ({:step C, :remaining-seconds 63} {:step B, :remaining-seconds 2})
+   => (C B)"
+  (map :step works))
+
+(defn complete-works
+  "근무 상태를 입력받아 진행 중인 job 중 remaining-time이 0가 된 job을 done에 추가하고,
+   progress-job에서 삭제하며 인원 수만큼 유휴 작업 인원을 증가시켜 반환한다.
+   ex)
+   input ->
+   {:in-progress-jobs ({:step C, :remaining-seconds 0}),
+    :done []
+    ...
+    :current-time 62,
+    :idle-workers 1}
+   output ->
+   {:in-progress-jobs (),
+    :done [C]
+    ...
+    :current-time 62,
+    :idle-workers 2}"
+  [work-status]
+  (let [{in-progress-jobs :in-progress-jobs
+         done :done
+         idle-workers :idle-workers} work-status
+        completed-works (->> in-progress-jobs
+                             (filter #(zero? (:remaining-seconds %))))
+        completed-work-names (concat done (works->work-names completed-works))
+        remaining-works (->> in-progress-jobs
+                             (remove #(zero? (:remaining-seconds %))))]
+    (-> work-status
+        (assoc :in-progress-jobs remaining-works)
+        (assoc :done completed-work-names)
+        (assoc :idle-workers (+ idle-workers (count completed-works))))))
+
+(defn do-work [work-status]
+  (->> work-status
+       dispatch-works-to-idle-workers
+       progress-works
+       complete-works))
+
+(defn solve-part2 [raw-text]
+  (let [initial-work-status (->> raw-text
+                                  parse-conditions
+                                  conditions->work-instructions
+                                  setup-initial-work-status)]
+     (fixed-point :in-progress-jobs do-work initial-work-status)))
 
 
 (comment
-  (get-work-duration "A")
-  (update-completed-work test)
-  (progress-work test)
-
-  test
-  (find-available-steps test) 
-  (progress-work test)
-  (progress-work (process-an-instruction-by-time test))
-  (dispatch-work (process-an-instruction-by-time test))
-  (process-an-instruction-by-time test)
-
-  (fixed-point :in-progress process-an-instruction-by-time context))
+  
+  (solve-part2 input)
+  )
