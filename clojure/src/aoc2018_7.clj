@@ -128,25 +128,6 @@
        (remove (fn [instruction] (in? (map :step (:in-progress-jobs work-status))
                                       (:step instruction))))))
 
-(defn complete-incoming-work
-  "work-status를 읽어들여 다음 작업을 실행 완료한다.
-   ex)
-   {:done [C A],
-    :work-instructions
-    .. 생략"
-  [work-status]
-  (let [next-step (-> work-status
-                      find-available-steps
-                      first
-                      :step)]
-    (if (nil? next-step)
-      work-status
-      {:current-time (:current-time work-status)
-       :in-progress-jobs (:in-progress-jobs work-status)
-       :done (conj (:done work-status) next-step)
-       :work-instructions (:work-instructions work-status)
-       :idle-workers (:idle-workers work-status)})))
-
 (defn fixed-point
   "고정점을 찾는 함수"
   ([f x]
@@ -157,6 +138,23 @@
                (reduced x)
                x'))
            (iterate f x))))
+
+;; 아래는 part 1에서만 사용되는 함수입니다.
+(defn complete-incoming-work
+  "work-status를 읽어들여 다음 작업을 즉시 실행 완료한다.
+   ex)
+   {:done [C A],
+    :work-instructions
+    .. 생략"
+  [work-status]
+  (let [{done :done} work-status
+        next-step (-> work-status
+                      find-available-steps
+                      first
+                      :step)]
+    (if (nil? next-step)
+      work-status
+      (assoc work-status :done (conj done next-step)))))
 
 (defn solve-part1 [raw-text]
   (let [initial-work-status (->> raw-text
@@ -303,7 +301,7 @@
         (assoc :idle-workers (+ idle-workers (count completed-works))))))
 
 (defn execute-work-cycle
-  "근무 상태를 입력받아 일의 한 사이클을 한다. 여기서 한 사이클이란, 최소 한 작업을 완료상태로 변경시킬 수 있는 업무량을 의미한다.
+  "근무 상태를 입력받아 업무 사이클을 1회 수행 한다. 여기서 업무 사이클이란, 최소 한 작업을 완료상태로 변경시킬 수 있는 업무량을 의미한다.
    ex)
    input ->
    {:in-progress-jobs ({:step C, :remaining-seconds 3}),
