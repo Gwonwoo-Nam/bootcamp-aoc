@@ -58,11 +58,10 @@
   (let [[_match x y] (re-matches #"\s*(\d+)[\s,]+(\d+)\s*" line)]
     {:x (parse-long x) :y (parse-long y)}))
 
-
-(defn parse-base-points [lines]
-  (->> (str/split-lines lines)
+(defn parse-base-points [raw-text]
+  (->> (str/split-lines raw-text)
        (map parse-point)
-       (map-indexed (fn [id point] {:id id :point point}))))
+       (map-indexed (fn [idx point] {:id idx :point point}))))
 
 ;; 모든 coordinate를 포함하는 최소-최대 Plane 생성
 
@@ -70,11 +69,12 @@
 ;; 성급한 최적화 X -> 병목이 발생할 때 고려해볼수도
 ;; comp, map으로 리팩토링
 (defn generate-plane-by-bases [bases]
-  (let [min-x (apply min-key identity (map #((comp :x :point) %) bases))
-        max-x (apply max-key identity (map #((comp :x :point) %) bases))
-        min-y (apply min-key identity (map #((comp :y :point) %) bases))
-        max-y (apply max-key identity (map #((comp :y :point) %) bases))]
-    (for [x (range min-x (inc max-x)) y (range min-y (inc max-y))]
+  (let [min-x (->> bases (map (comp :x :point)) (apply min))
+        max-x (->> bases (map (comp :x :point)) (apply max))
+        min-y (->> bases (map (comp :y :point)) (apply min))
+        max-y (->> bases (map (comp :y :point)) (apply max))]
+    (for [x (range min-x (inc max-x))
+          y (range min-y (inc max-y))]
       {:x x :y y})))
 
 ;; 두 점 사이 맨해튼 거리 계산
@@ -84,76 +84,83 @@
 ;; keyword ; data structure, protocol interface
 ;; SICP
 
+;; 다차원 확장
 (defn calculate-distance
   [point-a point-b]
   (+
    (abs (- (:x point-a) (:x point-b)))
    (abs (- (:y point-a) (:y point-b)))))
 
+(defn calculate-dist
+  [point-a point-b] 
+  (apply + (map #(abs (- %1 %2)) point-a point-b)))
+
+(calculate-dist [1 2 3 4] [2 4 6 8])
 (calculate-distance {:x 1 :y 2} {:x 3 :y 0})
 
 ;; 가장 가까운 coordinate의 id를 선택
 ;; 동률일 때 . 넣는 로직?
-(defn decide-base-id-to-belong
-  [bases point-on-plane]
-  (->> bases
-       (map (fn [base]
-              {:distance (calculate-distance
-                          (:point base) point-on-plane)
-               :id (:id base)}))
-       (sort-by :distance) 
-       first
-       :id))
+;; 특정 key만 반환하기보다 point 자체
+(defn decide-base-point-to-belong
+  [base-points point-on-plane]
+  (->> base-points
+       (map (fn [base-point]
+              {:distance   (calculate-distance (:point base-point) point-on-plane)
+               :id (:id base-point)
+               :point (:point base-point)}))
+       (sort-by :distance)
+       first))
 
 ;; tie인지 아닌지 확인하는 함수
 (defn is-tie?
-  [bases point-on-plane]
+  [base-points point-on-plane]
   (let [distance-from-point
-        (->> bases
-             (map (fn [base] (calculate-distance (:point base) point-on-plane)))
+        (->> base-points
+             (map (fn [base-point] (calculate-distance (:point base-point) point-on-plane)))
              (sort))]
     (= (first distance-from-point)
        (second distance-from-point))))
 
 ;; 가장짧은 맨해튼 거리의 plane을 완성
 (defn fill-base-plane
-  [generated-plane bases]
+  [generated-plane base-points]
   (->> generated-plane
        (map (fn [point]
-              {:base-id (decide-base-id-to-belong bases point)
-               :point point
-               :is-tie (is-tie? bases point)}))))
+              {:base-point (decide-base-point-to-belong base-points point)
+               :point      point
+               :is-tie     (is-tie? base-points point)}))))
 
 ;; edge에 있는 coordinate-id 집합을 찾음
 ;; base, point를 구분
 ;; find-overflow-bases
 ;; 적절한 수준의 추상화
 ;; sequence를 계속 유지하다가 자료구조로 가공하는것은 마지막에 하는게 좋다.
-(defn find-overflow-bases
+(defn find-overflow-base-points
   [belonging-base-plane]
-  (let [min-x (apply min-key identity (map #((comp :x :point) %) belonging-base-plane))
-        max-x (apply max-key identity (map #((comp :x :point) %) belonging-base-plane))
-        min-y (apply min-key identity (map #((comp :y :point) %) belonging-base-plane))
-        max-y (apply max-key identity (map #((comp :y :point) %) belonging-base-plane))]
+  (let [min-x (apply min (map (comp :x :point) belonging-base-plane))
+        max-x (apply max (map (comp :x :point) belonging-base-plane))
+        min-y (apply min (map (comp :y :point) belonging-base-plane))
+        max-y (apply max (map (comp :y :point) belonging-base-plane))]
     (->> belonging-base-plane
          (filter (fn [point-on-plane] (or (= min-x (:x (:point point-on-plane)))
                                           (= max-x (:x (:point point-on-plane)))
                                           (= min-y (:y (:point point-on-plane)))
                                           (= max-y (:y (:point point-on-plane))))))
-         (map :base-id)
+         (map (comp :id :base-point))
          (set))))
 
 ;; set의 용도에 맞게 사용
 (defn find-max-area-of-finite-coordinate
   [belonging-base-plane]
-  (let [infinite-set-of-coordinate-id (find-overflow-bases belonging-base-plane)]
+  (let [infinite-set-of-coordinate-id (find-overflow-base-points belonging-base-plane)]
     (->> belonging-base-plane
-         (remove #(contains? infinite-set-of-coordinate-id (:base-id %)))
+         (remove #(contains? infinite-set-of-coordinate-id (:id (:base-point %))))
          (remove :is-tie)
-         (group-by :base-id) 
+         (map :base-point)
+         (group-by :id) 
          (vals)
          (map count)
-         (apply max-key))))
+         (apply max))))
 
 (comment
 
@@ -172,7 +179,7 @@
 
   (generate-plane-by-bases list-of-bases)
 
-  (decide-base-id-to-belong list-of-bases {:x 1 :y 4})
+  (decide-base-point-to-belong list-of-bases {:x 1 :y 4})
   (is-tie? list-of-bases {:x 1 :y 4})
 
   (def base-plane ( generate-plane-by-bases list-of-bases))
@@ -180,8 +187,9 @@
   (def manhatten-space (fill-base-plane base-plane list-of-bases))
   manhatten-space
 
-  (find-overflow-bases manhatten-space)
-  (find-max-area-of-finite-coordinate manhatten-space))
+  (find-overflow-base-points manhatten-space)
+  (find-max-area-of-finite-coordinate manhatten-space)
+  )
 
 
 
