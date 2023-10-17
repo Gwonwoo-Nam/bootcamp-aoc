@@ -79,14 +79,14 @@
   "초기 work-status를 생성한다.
    work-status는 work-instructions과 현재 작업에 대한 메타정보를 포함한다.
    :current-time - 작업의 현재 진행 시각
-   :in-progress-jobs - 진행 중인 작업의 목록
+   :in-progress-works - 진행 중인 작업의 목록
    :done - 완료 작업 목록
    :work-instructions - 작업지침
    :idle-workers - 유휴 작업 가능 인원 수
 
    ex)
    {:current-time 0,
-    :in-progress-jobs [],
+    :in-progress-works [],
     :done [],
     :work-instructions
     ({:requirement (C), :step A}
@@ -100,7 +100,7 @@
    (setup-initial-work-status work-instructions 5))
   ([work-instructions number-of-workers]
    {:current-time 0
-    :in-progress-jobs []
+    :in-progress-works []
     :done []
     :work-instructions work-instructions
     :idle-workers number-of-workers}))
@@ -125,7 +125,7 @@
        (filter (fn [instruction] (subset? (set (:pre-requisites instruction)) 
                                           (set (:done work-status)))))
        (remove (fn [instruction] (in? (:done work-status) (:step instruction))))
-       (remove (fn [instruction] (in? (map :step (:in-progress-jobs work-status))
+       (remove (fn [instruction] (in? (map :step (:in-progress-works work-status))
                                       (:step instruction))))))
 
 (defn fixed-point
@@ -206,17 +206,17 @@
     :current-time 0,
     :idle-workers 2}
    output ->
-   {:in-progress-jobs ({:step C, :remaining-seconds 63}),
+   {:in-progress-works ({:step C, :remaining-seconds 63}),
     ...
     :current-time 0,
     :idle-workers 1}"
-  (let [{in-progress-jobs :in-progress-jobs 
+  (let [{in-progress-works :in-progress-works 
          idle-workers :idle-workers} work-status        
         dispatched-works (->> (find-available-steps work-status)
                               (take idle-workers)
                               (map instruction->work))]
     (-> work-status
-        (assoc :in-progress-jobs (concat in-progress-jobs dispatched-works))
+        (assoc :in-progress-works (concat in-progress-works dispatched-works))
         (assoc :idle-workers (- idle-workers (count dispatched-works))))))
 
 (defn calc-consequtive-work-time
@@ -245,22 +245,22 @@
   "근무 상태를 입력받아 현재 시각을 1초 증가시키고, 진행한 작업의 잔여 시간을 1초씩 감소시킨 근무 상태를 반환한다.
    ex)
    input ->
-   {:in-progress-jobs ({:step C, :remaining-seconds 63}),
+   {:in-progress-works ({:step C, :remaining-seconds 63}),
     ...
     :current-time 0,
     :idle-workers 1}
    output ->
-   {:in-progress-jobs ({:step C, :remaining-seconds 62}),
+   {:in-progress-works ({:step C, :remaining-seconds 62}),
     ...
     :current-time 1,
     :idle-workers 1}"
   [work-status]
-  (let [{in-progress-jobs :in-progress-jobs
+  (let [{in-progress-works :in-progress-works
          current-time :current-time} work-status
-        work-time (calc-consequtive-work-time in-progress-jobs)
-        progressed-jobs (map #(progress-a-work % work-time) in-progress-jobs)]
+        work-time (calc-consequtive-work-time in-progress-works)
+        progressed-works (map #(progress-a-work % work-time) in-progress-works)]
     (-> work-status
-        (assoc :in-progress-jobs progressed-jobs)
+        (assoc :in-progress-works progressed-works)
         (assoc :current-time (+ current-time work-time)))))
 
 (defn works->work-names
@@ -271,32 +271,32 @@
   (map :step works))
 
 (defn complete-works
-  "근무 상태를 입력받아 진행 중인 job 중 remaining-time이 0가 된 job을 done에 추가하고,
-   progress-job에서 삭제하며 인원 수만큼 유휴 작업 인원을 증가시켜 반환한다.
+  "근무 상태를 입력받아 진행 중인 work 중 remaining-time이 0가 된 work을 done에 추가하고,
+   progress-work에서 삭제하며 인원 수만큼 유휴 작업 인원을 증가시켜 반환한다.
    ex)
    input ->
-   {:in-progress-jobs ({:step C, :remaining-seconds 0}),
+   {:in-progress-works ({:step C, :remaining-seconds 0}),
     :done []
     ...
     :current-time 62,
     :idle-workers 1}
    output ->
-   {:in-progress-jobs (),
+   {:in-progress-works (),
     :done [C]
     ...
     :current-time 62,
     :idle-workers 2}"
   [work-status]
-  (let [{in-progress-jobs :in-progress-jobs
+  (let [{in-progress-works :in-progress-works
          done :done
          idle-workers :idle-workers} work-status
-        completed-works (->> in-progress-jobs
+        completed-works (->> in-progress-works
                              (filter #(zero? (:remaining-seconds %))))
         completed-work-names (concat done (works->work-names completed-works))
-        remaining-works (->> in-progress-jobs
+        remaining-works (->> in-progress-works
                              (remove #(zero? (:remaining-seconds %))))]
     (-> work-status
-        (assoc :in-progress-jobs remaining-works)
+        (assoc :in-progress-works remaining-works)
         (assoc :done completed-work-names)
         (assoc :idle-workers (+ idle-workers (count completed-works))))))
 
@@ -304,13 +304,13 @@
   "근무 상태를 입력받아 업무 사이클을 1회 수행 한다. 여기서 업무 사이클이란, 최소 한 작업을 완료상태로 변경시킬 수 있는 업무량을 의미한다.
    ex)
    input ->
-   {:in-progress-jobs ({:step C, :remaining-seconds 3}),
+   {:in-progress-works ({:step C, :remaining-seconds 3}),
     :done []
     ...
     :current-time 62,
     :idle-workers 1}
    output ->
-   {:in-progress-jobs (),
+   {:in-progress-works (),
     :done [C]
     ...
     :current-time 65,
