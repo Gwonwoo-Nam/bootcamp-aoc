@@ -187,7 +187,7 @@
     (+ default-work-duration (step->work-duration step))))
 
 ;; 0. dispatch-works-to-idle-workers : 다음 작업을 할당하고, 유휴 worker의 수를 업데이트한다.
-;; 1. progress-works : 시간 1초 증가시키고, 진행한 작업의 잔여 시간을 1초씩 감소시킨다.
+;; 1. progress-works : 다음 마감되는 업무시간까지 시간 n초 증가시키고, 진행한 작업의 잔여 시간을 n초씩 감소시킨다.
 ;; 2. complete-works : 잔여 시간이 0초인 작업을 완료 처리한다. (마감처리)
 
 (defn instruction->work
@@ -221,13 +221,27 @@
         (assoc :in-progress-jobs (concat in-progress-jobs dispatched-works))
         (assoc :idle-workers (- idle-workers (count dispatched-works))))))
 
+(defn calc-consequtive-work-time
+  "남은 작업 중 다음 마감 가능한 작업까지 연속해서 얼마 일해야할 지 계산한다.
+   ex)
+   ({:step B, :remaining-seconds 5}, {:step C, :remaining-seconds 62})
+   => 5(초)" 
+  [works]
+  (if (empty? works)
+    0
+    (->> works
+         (map :remaining-seconds)
+         (apply min))))
+
 (defn progress-a-work
-  "근무를 입력받아 잔여 시각을 1초 감소시켜 반환한다.
+  "일과 근무시간을 입력받아 잔여 시각을 근무시간만큼 감소시켜 반환한다.
    ex)
    {:step C, :remaining-seconds 63} -> {:step C, :remaining-seconds 62}"
-  [work]
-  (let [progressed-time (dec (:remaining-seconds work))]
-    (assoc work :remaining-seconds progressed-time)))
+  ([work]
+   (progress-a-work work 1))
+  ([work work-time]
+   (let [progressed-time (- (:remaining-seconds work) work-time)]
+     (assoc work :remaining-seconds progressed-time))))
 
 (defn progress-works
   "근무 상태를 입력받아 현재 시각을 1초 증가시키고, 진행한 작업의 잔여 시간을 1초씩 감소시킨 근무 상태를 반환한다.
@@ -245,10 +259,11 @@
   [work-status]
   (let [{in-progress-jobs :in-progress-jobs
          current-time :current-time} work-status
-        progressed-jobs (map progress-a-work in-progress-jobs)]
+        work-time (calc-consequtive-work-time in-progress-jobs)
+        progressed-jobs (map #(progress-a-work % work-time) in-progress-jobs)]
     (-> work-status
         (assoc :in-progress-jobs progressed-jobs)
-        (assoc :current-time (inc current-time)))))
+        (assoc :current-time (+ current-time work-time)))))
 
 (defn works->work-names
   [works]
@@ -287,7 +302,22 @@
         (assoc :done completed-work-names)
         (assoc :idle-workers (+ idle-workers (count completed-works))))))
 
-(defn do-work [work-status]
+(defn execute-work-cycle
+  "근무 상태를 입력받아 일의 한 사이클을 한다. 여기서 한 사이클이란, 최소 한 작업을 완료상태로 변경시킬 수 있는 업무량을 의미한다.
+   ex)
+   input ->
+   {:in-progress-jobs ({:step C, :remaining-seconds 3}),
+    :done []
+    ...
+    :current-time 62,
+    :idle-workers 1}
+   output ->
+   {:in-progress-jobs (),
+    :done [C]
+    ...
+    :current-time 65,
+    :idle-workers 2}"
+  [work-status]
   (->> work-status
        dispatch-works-to-idle-workers
        progress-works
@@ -298,10 +328,17 @@
                                   parse-conditions
                                   conditions->work-instructions
                                   setup-initial-work-status)]
-     (fixed-point :in-progress-jobs do-work initial-work-status)))
+     (fixed-point :current-time execute-work-cycle initial-work-status)))
 
 
 (comment
-  
+  (def input "Step C must be finished before step A can begin.
+                             Step C must be finished before step F can begin.
+                             Step A must be finished before step B can begin.
+                             Step A must be finished before step D can begin.
+                             Step B must be finished before step E can begin.
+                             Step D must be finished before step E can begin.
+                             Step F must be finished before step E can begin.")
+  (solve-part1 input)
   (solve-part2 input)
-  )
+)
